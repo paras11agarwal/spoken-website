@@ -988,6 +988,35 @@ def upload_component(request, trid, component):
                             tr_rec, comp_title,
                             '{} waiting for domain review'.format(component.replace('_', ' ').title()))
                         response_msg = 'Additional material uploaded successfully!'
+                    elif component == 'audio':
+                        file_name, file_extension = os.path.splitext(request.FILES['comp'].name)
+                        file_name =  tr_rec.tutorial_detail.tutorial.replace(' ', '-') + '-' + tr_rec.language.name + file_extension
+                        file_path = settings.MEDIA_ROOT + 'videos/' + str(tr_rec.tutorial_detail.foss_id) + '/' + str(tr_rec.tutorial_detail.id) + '/'
+                        full_path = file_path + file_name
+                        if os.path.isfile(file_path + tr_rec.video) and tr_rec.video_status > 0:
+                            if 'isarchive' in request.POST and int(request.POST.get('isarchive', 0)) > 0:
+                                archived_file = 'Archived-' + str(request.user.id) + '-' + str(int(time.time())) + '-' + tr_rec.video
+                                os.rename(file_path + tr_rec.video, file_path + archived_file)
+                                ArchivedVideo.objects.create(tutorial_resource = tr_rec, user = request.user, version = tr_rec.version, video = archived_file, atype = tr_rec.video_status)
+                                if int(request.POST.get('isarchive', 0)) == 2:
+                                    tr_rec.version += 1
+                        fout = open(full_path, 'wb+')
+                        f = request.FILES['comp']
+                        # Iterate through the chunks.
+                        for chunk in f.chunks():
+                            fout.write(chunk)
+                        fout.close()
+                        comp_log.status = tr_rec.video_status
+                        tr_rec.video = file_name
+                        tr_rec.video_user = request.user
+                        tr_rec.video_status = 1
+                        if not tr_rec.version:
+                            tr_rec.version = 1
+                        tr_rec.save()
+                        comp_log.save()
+                        comp_title = tr_rec.tutorial_detail.foss.foss + ': ' + tr_rec.tutorial_detail.tutorial + ' - ' + tr_rec.language.name
+                        add_adminreviewer_notification(tr_rec, comp_title, 'Audio waiting for admin review')
+                        response_msg = 'Audio uploaded successfully!'
                 except Exception, e:
                     print e
                     error_msg = 'Something went wrong, please try again later.'
@@ -1112,7 +1141,8 @@ def tutorials_contributed(request):
                 11: SortableHeader('Additional material', False, '', 'col-center'),
                 12: SortableHeader('Prerequisite', False, '', 'col-center'),
                 13: SortableHeader('Keywords', False, '', 'col-center'),
-                14: SortableHeader('Status', False)
+                14: SortableHeader('Status', False),
+                15: SortableHeader('Audio',False,'','col-center')
             }
             tmp_recs = get_sorted_list(request, tmp_recs, header, raw_get_data)
             ordering = get_field_index(raw_get_data)

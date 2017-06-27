@@ -459,6 +459,7 @@ class ComponentForm(forms.Form):
         super(ComponentForm, self).clean()
         file_types = {
             'video': 'video/ogg',
+            'audio':'audio/mp3',
             'slide': ['application/zip', 'application/x-zip-compressed'],
             'code': ['application/zip', 'application/x-zip-compressed'],
             'assignment': ['text/plain', 'application/pdf'],
@@ -474,6 +475,7 @@ class ComponentForm(forms.Form):
         component_type = self.cleaned_data['comptype']
         if component and component_type:
             if not component.content_type in file_types[component_type]:
+                print component.content_type
                 self._errors["comp"] = self.error_class(["Not a valid file format."])
         else:
             raise forms.ValidationError("Access Denied!")
@@ -481,7 +483,13 @@ class ComponentForm(forms.Form):
 
     def __init__(self, comptype, *args, **kwargs):
         super(ComponentForm, self).__init__(*args, **kwargs)
-        if comptype == 'video':
+        if comptype == 'audio':
+            self.fields['isarchive'] = forms.ChoiceField(
+                choices = [(0, 'Replace old audio'), (1, 'Archive old audio as Correction'), (2, 'Archive old audio as Version')],
+                widget=forms.Select(),
+                required = False,
+            )
+        elif comptype == 'video':
             tmp_choices1 = []
             tmp_choices2 = []
             for i in range(60):
@@ -503,7 +511,7 @@ class ComponentForm(forms.Form):
                 required = True,
             )
             self.fields['isarchive'] = forms.ChoiceField(
-                choices = [(0, 'Replace old video'), (1, 'Archive old video as Correction'), (2, 'Archive old video as Version')],
+                choices = [(0, 'Replace old audio'), (1, 'Archive old audio as Correction'), (2, 'Archive old audio as Version')],
                 widget=forms.Select(),
                 required = False,
             )
