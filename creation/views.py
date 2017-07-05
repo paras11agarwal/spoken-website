@@ -1,5 +1,12 @@
 import os
 import re
+import math
+from scipy.io import wavfile
+from scipy.stats import signaltonoise
+import numpy 
+import numpy 
+import wave
+import subprocess
 import json
 import time
 import subprocess
@@ -29,6 +36,9 @@ from creation.forms import *
 from creation.models import *
 from creation.subtitles import *
 from . import services
+
+from os import listdir
+from os.path import isfile, join
 
 def humansize(nbytes):
     suffixes = ['B', 'KB', 'MB', 'GB', 'TB', 'PB']
@@ -990,33 +1000,90 @@ def upload_component(request, trid, component):
                         response_msg = 'Additional material uploaded successfully!'
                     elif component == 'audio':
                         file_name, file_extension = os.path.splitext(request.FILES['comp'].name)
-                        file_name =  tr_rec.tutorial_detail.tutorial.replace(' ', '-') + '-' + tr_rec.language.name + file_extension
+                        file_name =  tr_rec.tutorial_detail.tutorial.replace(' ', '-') + '-' + tr_rec.language.name 
                         file_path = settings.MEDIA_ROOT + 'videos/' + str(tr_rec.tutorial_detail.foss_id) + '/' + str(tr_rec.tutorial_detail.id) + '/'
-                        full_path = file_path + file_name
-                        if os.path.isfile(file_path + tr_rec.video) and tr_rec.video_status > 0:
-                            if 'isarchive' in request.POST and int(request.POST.get('isarchive', 0)) > 0:
-                                archived_file = 'Archived-' + str(request.user.id) + '-' + str(int(time.time())) + '-' + tr_rec.video
-                                os.rename(file_path + tr_rec.video, file_path + archived_file)
-                                ArchivedVideo.objects.create(tutorial_resource = tr_rec, user = request.user, version = tr_rec.version, video = archived_file, atype = tr_rec.video_status)
-                                if int(request.POST.get('isarchive', 0)) == 2:
-                                    tr_rec.version += 1
+                        full_path = file_path + file_name+".mp3"
                         fout = open(full_path, 'wb+')
                         f = request.FILES['comp']
                         # Iterate through the chunks.
                         for chunk in f.chunks():
                             fout.write(chunk)
                         fout.close()
+
                         comp_log.status = tr_rec.video_status
                         tr_rec.video = file_name
                         tr_rec.video_user = request.user
                         tr_rec.video_status = 1
-                        if not tr_rec.version:
-                            tr_rec.version = 1
-                        tr_rec.save()
+
+                        cmd="mkdir "+file_path+"video_edit"
+                        subprocess.call(cmd,shell=True)
+
+                        command ="ffmpeg -y -i "+full_path+" "+file_path+"video_edit/sample.wav"
+                        subprocess.call(command,shell=True)
+
+                        samplerate, data =wavfile.read(file_path+"video_edit/sample.wav")
+                        try:
+                            samplerate=numpy.sum(data,axis=1)
+                        except:
+                            pass
+                        norm=samplerate/ (max(numpy.amax(samplerate), -1*numpy.amin(samplerate)))
+                        ratio=signaltonoise(norm,axis=None)
+                        ratio=(ratio+2)/(4)
+                        if(ratio<0):
+                            ratio=0
+                        # to check the ampllitude of the uploaded video
+                        sampFreq, snd = wavfile.read(file_path+"video_edit/sample.wav")
+                        snd=snd / (2.**15)
+                        s1=snd[:,0]
+                    
+                        mean=numpy.sqrt(numpy.mean(numpy.square(s1)))
+                        print ratio, mean
+                        # noise check
+                        # if(ratio>0)&(ratio<1):
+                        # to reduce the noise from the audio
+                        if(ratio<0.5 and mean<0.20):
+                            #`ating the noisefree wav file 
+                            command ="bash "+settings.MEDIA_ROOT+"noNoise/noNoise.sh "+file_path+"video_edit/sample.wav "+ str(ratio)
+                            subprocess.call(command,shell=True)
+                            print "Noise has been removed and created a noNoise.wav file"
+
+                            #the video is fine to be uploaded
+                            check_status=1
+                            cmd="rm "+full_path
+                            subprocess.call(cmd,shell=True)
+                            
+
+                            command="ffmpeg -y -i /tmp/noisefree.wav "+full_path
+                            subprocess.call(command,shell=True)
+                            cmd="rm -r "+file_path+"video_edit"
+                            subprocess.call(cmd,shell=True)
+
+                            cmd="rm /tmp/noisefree.wav" 
+                            subprocess.call(cmd,shell=True)
+                            #converting noisefree wav to mp3
+                            print 'noNoise.wav file converted to the "NAME OF ORIGNAL FILE".mp3'
+                        else:
+                            check_status=2
+
+                        
+                        #tr_rec.save()
                         comp_log.save()
                         comp_title = tr_rec.tutorial_detail.foss.foss + ': ' + tr_rec.tutorial_detail.tutorial + ' - ' + tr_rec.language.name
-                        add_adminreviewer_notification(tr_rec, comp_title, 'Audio waiting for admin review')
-                        response_msg = 'Audio uploaded successfully!'
+                        add_adminreviewer_notification(tr_rec, comp_title, 'audio waiting for admin review')
+                        #response_msg = 'Audio uploaded successfully!'
+
+                        if(check_status==1):
+                            response_msg="Audio uploaded!!!"
+                            tr_rec.save()
+                        elif(check_status==2):
+                            if(ratio>0.5):
+                                error_msg="Audio quality is poor..too much noise...Please try another audio!!"
+                            if(mean>0.2):
+                                error_msg="Audio quality is poor...too loud...Please try with another audio!!!"
+                            cmd="rm "+file_path+"*"
+                            subprocess.call(cmd,shell=True)
+                            cmd="rm -r "+file_path+"video_edit"
+                            subprocess.call(cmd,shell=True)
                 except Exception, e:
                     print e
                     error_msg = 'Something went wrong, please try again later.'
